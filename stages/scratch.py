@@ -12,9 +12,18 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # Load Falcon model and tokenizer
-model_id = "google/flan-t5-base"
+model_id = "google/flan-t5-base" # from https://huggingface.co/google/flan-t5-base
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 tokenizer.add_tokens(['<FLOOPIN>'])
+
+# show me the out of vocabulary token id
+print(tokenizer.unk_token_id)
+
+# how many tokens are in the tokenizer?
+print(len(tokenizer))
+
+# show me the token assigned to index 525
+print(tokenizer.decode(30000))
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_id, device_map="auto")
 model.resize_token_embeddings(len(tokenizer))
