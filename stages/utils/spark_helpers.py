@@ -50,6 +50,8 @@ smiles_to_selfies_udf = udf(smiles_to_selfies_safe, StringType())
 
 # SELFIES SYMBOL SPLITTER UDF ====================================================================
 def split_selfies(selfies_string):
-    return selfies.split_selfies(selfies_string) if selfies_string else []
+    return list(selfies.split_selfies(selfies_string)) if selfies_string else []
 
 split_selfies_udf = udf(split_selfies, ArrayType(StringType()))
+
+
