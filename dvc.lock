@@ -1,0 +1,47 @@
+schema: '2.0'
+stages:
+  load_pubchem:
+    cmd: python stages/01_load_pubchem.py
+    deps:
+    - path: stages/01_load_pubchem.py
+      hash: md5
+      md5: fad1cd1259b63eac48a6849bae318882
+      size: 6742
+    - path: stages/utils/pubchem_annotations.py
+      hash: md5
+      md5: be6e9135b31a7c676ef1936c8d25817f
+      size: 563
+    - path: stages/utils/spark_helpers.py
+      hash: md5
+      md5: 5cf85d52ffc5ff0581d53eedb6a71673
+      size: 1944
+    outs:
+    - path: cache/01_load_pubchem/compait_tst.parquet
+      hash: md5
+      md5: d2097b264e076ef958fc6a4adf27a739
+      size: 3610630
+    - path: cache/01_load_pubchem/selfies_property_value.parquet
+      hash: md5
+      md5: 664f1fcd124e9816c6668e36c8938775
+      size: 167276139
+  mistral_tokenize:
+    cmd: python stages/02_mistraltoken.py
+    deps:
+    - path: cache/01_load_pubchem/selfies_property_value.parquet
+      hash: md5
+      md5: 664f1fcd124e9816c6668e36c8938775
+      size: 167276139
+    - path: stages/02_mistraltoken.py
+      hash: md5
+      md5: 27347f428484b16999b8047564040e3b
+      size: 3534
+    outs:
+    - path: cache/02_mistraltoken/mistraltokenizer
+      hash: md5
+      md5: 39540483458090098a080de17437041a.dir
+      size: 3201186
+      nfiles: 5
+    - path: cache/02_mistraltoken/selfies_property_value_tensor.parquet
+      hash: md5
+      md5: 15482a4decb29342034fb6953d434722
+      size: 618225363

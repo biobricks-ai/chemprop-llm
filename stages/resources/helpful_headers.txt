@@ -1,0 +1,214 @@
+properties
+drug
+medication
+medical
+information
+food
+pharmacology
+absorption
+metabolism
+biological
+mechanism
+human
+biochemical
+uses
+use classification
+industry uses
+consumer uses
+household products
+manufacturing
+fragrance
+impurities
+consumption
+u.s. production
+general manufacturing information
+clinical laboratory methods
+classification
+hazard
+health
+fire
+explosion
+hazards
+fire
+skin
+eye
+respiratory
+irritation
+epa hazardous
+aegls table
+aegls notes
+flammable limits
+lower explosive limit
+upper explosive limit
+critical temperature
+physical dangers
+explosive limits
+osha standards
+recommendations
+first aid
+fire
+accidental release
+isolation and evacuation
+spillage
+cleanup
+disposal
+preventative
+handling
+spill response
+safe storage
+storage conditions
+exposure control
+permissible exposure limit
+exposure
+dangerous
+threshold limit values
+occupational
+emergency
+regulations
+inhalation
+prevention
+stability
+reactions
+reactivity
+transport
+dot emergency
+shipment
+dot label
+packaging and labelling
+ec classification
+un classificaiton
+atmospheric
+guidelines
+drinking
+water
+cercla
+rcra
+requirements
+history
+toxic
+iris
+niosh
+carcin
+cancer
+evidence
+symptoms
+organs
+acute
+adverse
+treatment
+interactions
+antidote
+national toxicology program
+tsca
+risk
+ecological
+ecotoxicity
+screening
+epa
+environmental
+pollution
+environment
+adsorption
+water
+effluent
+disease
+ghs
+iarc
+biodegradation
+absorption
+toxicity data
+mechanism
+preventions
+environmental fate (complete)
+risk
+persistence
+non-human toxicity excerpts
+ingestion
+effects of short term exposure
+acute toxicity link
+acute
+drug induced liver injury
+disease
+metabolism
+therapeutic uses
+irritation
+environmental
+injury
+drug tolerance
+teratogenic
+evidence for carcinogenicity
+inhalation
+combustion
+respiratory
+limit
+symptom
+toxicity summary
+hazardous substances databank number
+target organs
+health
+distribution
+biomonitoring
+biological half-life
+reported fatal dose
+bioaccumulation
+health hazards
+disorder
+hazards identification
+threshold
+health effects
+antidote
+fatal
+surveillance
+allergy
+precaution
+biological
+toxic
+effects of long term exposure
+toxicity
+mechanism of action (complete)
+evidence for carcinogenicity (complete)
+excretion
+ecotoxicity excerpts
+bioconcentration
+ecotoxicity
+symptoms
+first aid
+animal concentrations
+ecotoxicity values
+poison
+effect
+exposure routes
+hazard
+hazardous
+human toxicity values
+vulnerability
+danger
+absorption, distribution and excretion
+toxicological information
+reactivity
+mutagenic
+exposure
+reaction
+body burden
+associated disorders and diseases
+dermal
+dose
+chronic
+flammable
+contamination
+skin, eye, and respiratory irritations
+toxic combustion products
+probable routes of human exposure
+emergency
+safety
+mechanism of action
+carcinogenic
+organ
+recommended exposure limit (rel)
+target
+human toxicity excerpts
+sensitivity
+human toxicity values (complete)
+lethal
+absorption, distribution and excretion (complete)
+drug classes

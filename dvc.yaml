@@ -1,0 +1,35 @@
+stages:
+  load_pubchem:
+    cmd: python stages/01_load_pubchem.py
+    deps:
+      - stages/01_load_pubchem.py
+      - stages/utils/spark_helpers.py
+      - stages/utils/pubchem_annotations.py
+    outs:
+      - cache/01_load_pubchem/selfies_property_value.parquet
+      - cache/01_load_pubchem/compait_tst.parquet
+
+  mistral_tokenize:
+    cmd: python stages/02_mistraltoken.py
+    deps:
+      - stages/02_mistraltoken.py
+      - cache/01_load_pubchem/selfies_property_value.parquet
+    outs:
+      - cache/02_mistraltoken/mistraltokenizer
+      - cache/02_mistraltoken/selfies_property_value_tensor.parquet
+
+  build_train_test:
+    cmd: python stages/03_build_train_test.py
+    deps:
+      - stages/03_build_train_test.py
+      - cache/02_mistraltoken/selfies_property_value_tensor.parquet
+    outs:
+      - cache/03_build_train_test
+
+  make_h5:
+    cmd: python stages/04_makeh5.py
+    deps:
+      - stages/04_makeh5.py
+      - cache/03_build_train_test
+    outs:
+      - cache/04_makeh5/chem_data_tokenized.h5
