@@ -16,6 +16,9 @@ from peft import LoraConfig
 
 sys.path.append("./")
 import stages.utils.mistral_tools as mistral_tools
+import stages.utils.slack
+
+stages.utils.slack.send_slack_notification()
 
 dotenv.load_dotenv()
 huggingface_hub.login(token=os.getenv("HUGGINGFACE_TOKEN"))
@@ -26,8 +29,16 @@ outdir = Path("cache/05_train_compait")
 (outdir / "train").mkdir(parents=True, exist_ok=True)
 
 # build tensors for training and testing
-cmptrn = pd.read_parquet("cache/00_load_compait/cmptrain.parquet")
-cmptst = pd.read_parquet("cache/00_load_compait/cmptest.parquet")
+spv = pd.read_parquet("cache/01_load_pubchem/selfies_property_value.parquet")
+spv = spv[spv['value'] != "none"]
+spv[['selfies', 'property', 'value']]
+
+mgl_property = 'Lethal concentration where 50% of the population dies during a 4-hour exposure of inhalation, AKA 4hr_LC50 (mg/L)'
+ppm_property = 'Parts of the chemical per million where 50% of the population dies during a 4-hour exposure of inhalation, AKA 4hr_LC50 (ppm)'
+spv = spv[spv['property'].isin([mgl_property, ppm_property])]
+
+encode_number = lambda x: f"{round(float(x),1)}".replace('-', 'negative ') if round(float(x),1) < 0 else f"positive {round(float(x),1)}".replace('-','')
+spv['value'] = spv['value'].progress_apply(encode_number)
 
 # load tokenizer
 tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
@@ -35,16 +46,16 @@ tokenizer.pad_token = "[PAD]"
 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
 
 # create a tensor_string from cmptrn by combining COMPOUND, PROPERTY, and VALUE
-cmptrn['tensor_string'] = cmptrn.progress_apply(lambda x: f"{x['COMPOUND']} <property> {x['PROPERTY']} <value> {x['VALUE']}", axis=1)
-cmptrn['tensor'] = cmptrn['tensor_string'].progress_apply(lambda x: tokenizer(x, return_tensors="pt").input_ids[0])
+spv['tensor_string'] = spv.progress_apply(lambda x: f"{x['selfies']} <property> {x['property']} <value> {x['value']}", axis=1)
+spv['tensor'] = spv['tensor_string'].progress_apply(lambda x: tokenizer(x, return_tensors="pt").input_ids[0])
 
 # what is the max length of the tensor?
-max_length = max([len(tensor) for tensor in cmptrn['tensor'].tolist()])
+max_length = max([len(tensor) for tensor in spv['tensor'].tolist()])
 print(f"Max length of the tensor: {max_length}")
 
 # Pad or truncate each tensor to a size of 1024
-tensor_list = cmptrn['tensor'].tolist()
-truncpad = lambda arr, max_len=124: np.pad(arr[:max_len], (0, max_len - len(arr[:max_len])), mode='constant')
+tensor_list = spv['tensor'].tolist()
+truncpad = lambda arr, max_len=max_length: np.pad(arr[:max_len], (0, max_len - len(arr[:max_len])), mode='constant')
 tensor_list_padded = np.stack([truncpad(tensor) for tensor in tqdm(tensor_list)])
 ptensors = torch.tensor(tensor_list_padded)
 ptensors.shape # N, 124
@@ -64,7 +75,7 @@ args = {
     "num_train_epochs": 30,
     "logging_steps": 1,
     "save_steps": 50,
-    "eval_steps": 2,  # Evaluate every 100 steps
+    "eval_steps": 10,  # Evaluate every 100 steps
     "learning_rate": 1e-5,
     "output_dir": str(outdir / "train"),
     "logging_dir": str(outdir / "logs"),
@@ -78,9 +89,6 @@ args = {
 training_args = TrainingArguments(**args)
 
 model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", device_map="auto")
-for param in model.get_input_embeddings().parameters():
-    param.requires_grad = False
-
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -96,7 +104,7 @@ chkpt = outdir / "train" / "checkpoint-150"
 model = AutoModelForCausalLM.from_pretrained(chkpt, device_map="auto", use_flash_attention_2=True, torch_dtype=torch.float16)
 model = model.eval()
 
-categories = list(set(cmptrn['VALUE'].values))
+categories = list(set(spv['value'].values))
 max_category_length = max([len(tokenizer(category).input_ids) for category in categories])
 
 def category_to_float(category):
@@ -107,12 +115,9 @@ def category_to_float(category):
     else:
         return float(category)
 
-
-results = []
 test_tensors = [sample['input_ids'] for sample in train_test_split["test"]]
-test_values = [tokenizer.decode(tensor, skip_special_tokens=True).split("Answer: ")[-1].strip()[-1:] for tensor in test_tensors]
-test_values = [category_to_float(value) for value in test_values]
-
+test_values = [category_to_float(tokenizer.decode(tensor, skip_special_tokens=True)[-12:]) for tensor in test_tensors]
+results = []
 for tensor in tqdm(test_tensors):
     args = {"model": model, "tokenizer": tokenizer, "categories": categories, "max_category_length": max_category_length}
     cd = mistral_tools.generate_categorical_distribution_logits(**args, input_tensor=tensor.to(model.device))
