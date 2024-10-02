@@ -1,94 +1,75 @@
-import os, sys, numpy as np, itertools, pathlib, tqdm, random
-import torch, torch.utils.data, torch.optim as optim, torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer, AutoModelForSeq2SeqLM
-from datasets import load_dataset, dataset_dict
-from peft import LoraConfig
+from joblib import Memory
+from bs4 import BeautifulSoup
+from PyPDF2 import PdfReader
 
-import transformers
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
+import time
+import itertools
+import io
+import numpy as np, pandas as pd
+import json
+import os
+import biobricks as bb
+import pandas as pd
+import pathlib
+import shutil
+import re
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import sys
+sys.path.append('./')
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import stages.utils.bing_search as bing_search
+import stages.utils.scraperapi as scraperapi
+import stages.utils.chatgpt as chatgpt
 
-# Load Falcon model and tokenizer
-model_id = "google/flan-t5-base" # from https://huggingface.co/google/flan-t5-base
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-tokenizer.add_tokens(['<FLOOPIN>'])
+crawler = scraperapi.WebCrawler(num_workers=10, scraperapi_key=os.getenv('SCRAPERAPI_KEY'), max_queue_size=10)
 
-# show me the out of vocabulary token id
-print(tokenizer.unk_token_id)
-
-# how many tokens are in the tokenizer?
-print(len(tokenizer))
-
-# show me the token assigned to index 525
-print(tokenizer.decode(30000))
-
-model = AutoModelForSeq2SeqLM.from_pretrained(model_id, device_map="auto")
-model.resize_token_embeddings(len(tokenizer))
-
-def floopin_sequence_prob(model):
+# Extract relevant text snippets around compound name or CAS number mentions
+def text_blobs(text, compound_name, casrn):
+    text_lower = text.lower()
+    patterns = [re.escape(compound_name.lower()), re.escape(casrn.lower())]
+    indices = [m.start() for p in patterns for m in re.finditer(p, text_lower)]
+    return [text[max(0, i-500):min(len(text), i+500)] for i in sorted(indices)]
     
-    test_input = "This is a test sentence."
-    inputs = tokenizer(test_input, return_tensors="pt").to(model.device)
+def pdf_to_text(content):
+    return '\n'.join([page.extract_text() for page in PdfReader(io.BytesIO(content)).pages])
 
-    # Get the probabilities of generating the floopin sequence
-    model = model.eval()
-    outputs = model.generate(**inputs)
-    logits = model(**inputs, decoder_input_ids=outputs[:, :-1]).logits
+def html_to_text(content):
+    return BeautifulSoup(content, 'html.parser').get_text()
 
-    floopin_tokens = tokenizer.encode("<FLOOPIN>", add_special_tokens=False)
-    floopin_sequence = floopin_tokens * 1  # Repeat 5 times
+# score a text blob based on how relevant it is to the compound name and casrn
+def blobscore(blob, compound_name, casrn):
+    text_lower = blob.lower()
+    score = sum([
+        compound_name.lower() in text_lower or casrn.lower() in text_lower,
+        sum(term in text_lower for term in ['acute', 'inhalation', 'toxicity', 'lc50']),
+        2 if 'ppm' in text_lower else 1 if 'mg/l' in text_lower or 'mg/m3' in text_lower else 0,
+        '4 hour' in text_lower or '4-hour' in text_lower,
+        2 * sum(phrase in text_lower for phrase in ['inhalation lc50', 'acute inhalation toxicity']),
+        -1 if len(blob) < 100 else 0
+    ])
+    return score
 
-    probs = torch.softmax(logits[0], dim=-1)
-    floopin_probs = [probs[i, token].item() for i, token in enumerate(floopin_sequence)]
+# get good text blobs from a url based on having relevant terms to the args
+def getblobs(url, compound_name, casrn):
+    task = scraperapi.ScrapeTask(url, autoparse=True, binary=url.endswith('.pdf'), ultra_premium=True)
+    res = crawler._scrape(task)
+    text = pdf_to_text(res.content) if url.endswith('.pdf') else html_to_text(res.text)
+    blobs = text_blobs(text, compound_name, casrn)
+    return blobs
 
-    return floopin_probs
+def build_prompt(compound_name, casrn):
+    query = f"\"{compound_name}\" \"acute\" \"inhalation\" \"LC50\" \"ppm\""
+    urls = [url['url'] for url in bing_search.bing_search(query, count=10)]
+    
+    blobs = list(itertools.chain.from_iterable(getblobs(url, compound_name, casrn) for url in urls))
+    scores = [blobscore(blob, compound_name, casrn) for blob in blobs]
+    
+    topblobs = sorted(zip(blobs, scores), key=lambda x: x[1], reverse=True)[:5]
+    blobtext = '\n\n'.join([blob for blob, score in topblobs])
 
-
-# Load your dataset
-dataset = load_dataset("imdb", split="train")  # Example IMDB dataset
-
-def tokenize_function(examples):
-    inputs = tokenizer(examples["text"], padding="max_length", truncation=True, max_length=256)
-    labels = tokenizer(["<FLOOPIN> <FLOOPIN> <FLOOPIN> <FLOOPIN> <FLOOPIN>"] * len(examples["text"]), 
-                       padding="max_length", truncation=True, max_length=256)
-    inputs["labels"] = labels["input_ids"]
-    return inputs
-
-# Tokenize the dataset
-tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=dataset.column_names)
-
-# Training arguments
-training_args = TrainingArguments(
-    output_dir="./flan-t5-floopin",
-    per_device_train_batch_size=32,
-     num_train_epochs=3,
-     logging_steps=100,
-     save_steps=1000,
-     learning_rate=1e-2,
-)
-# Trainer for fine-tuning
-trainer = Trainer(model=model, args=training_args, train_dataset=tokenized_dataset)
-# Fine-tune the model
-prob1 = floopin_sequence_prob(model)
-model = model.train()
-trainer.train()
-prob2 = floopin_sequence_prob(model)
-
-# Compare relative probabilities before and after fine-tuning
-rel_prob_change = [after / before for before, after in zip(prob1, prob2)]
-print(f"FLOOPIN sequence relative probability changes: {rel_prob_change}")
-print(f"Average change: {sum(rel_prob_change) / len(rel_prob_change):.2f}x")
-
-test_input = "This is a test sentence."
-test_inputs = tokenizer(test_input, return_tensors="pt").to(model.device)
-outputs = model.generate(**test_inputs, max_new_tokens=20)
-print(f"Input: {test_input}")
-print(f"Output: {tokenizer.decode(outputs[0], skip_special_tokens=True)}")
-
-
-# Save the fine-tuned model
-model.save_pretrained("./flan-t5-floopin")
-tokenizer.save_pretrained("./flan-t5-floopin")
+    prompt = f"""use what you know, and the below text blobs to estimate 
+    the 4-hour human inhalation LC50 value of {compound_name} with cas {casrn} in ppm.\n{blobtext}"""
+    
+    return prompt
