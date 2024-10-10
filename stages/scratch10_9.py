@@ -1,18 +1,15 @@
-import sqlite3
+import sqlite3, logging, json, re, shutil, sys
 from pathlib import Path
-from tqdm import tqdm
 import numpy as np
 import pandas as pd
-import logging
+from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.metrics import r2_score
-import stages.utils.chatgpt as chatgpt
-import stages.utils.memory as memory
-import biobricks as bb, sys, json, pyspark.sql.functions as F, shutil
-import re
-sys.path.append('./')
-import stages.utils.spark_helpers as sh
-import stages.utils.pubchem_annotations as pubchem_annotations
+import biobricks as bb
+import pyspark.sql.functions as F
+import stages.utils.chatgpt as chatgpt, stages.utils.memory as memory
+import stages.utils.spark_helpers as sh, stages.utils.pubchem_annotations as pubchem_annotations
+sys.path.append('./') 
 tqdm.pandas()
 outdir = Path("cache/rag_approach")
 outdir.mkdir(parents=True, exist_ok=True)
@@ -32,7 +29,6 @@ pc_annotations['value'] = pc_annotations['Data'].progress_apply(pubchem_annotati
 pc_annotations1 = pc_annotations.merge(pcid, on='PubChemCID', how='inner')
 pc_annotations2 = pc_annotations1[['dsstox', 'PubChemCID', 'heading', 'value']]
 
-# Filter pc_annotations2 to include only rows where dsstox is in compait_trn
 compait = bb.assets('compait')
 compait_trn = pd.read_parquet(compait.LC50_Tr_parquet)
 minmgl, maxmgl = 10 ** compait_trn['4_hr_value_mgL'].min(), 10 ** compait_trn['4_hr_value_mgL'].max()
@@ -43,13 +39,9 @@ pc_annotations_trn = pc_annotations2[pc_annotations2['dsstox'].isin(compait_dsst
 
 
 db_path = outdir / "pubchem_annotations.db"
-# Create both tables in the same database with relevant indexes
 with sqlite3.connect(db_path) as conn:
-    # Save pc_annotations_trn table
     # pc_annotations_trn.to_sql('pc_annotations_trn', conn, if_exists='replace', index=False)
     # conn.execute('CREATE INDEX IF NOT EXISTS idx_dsstox_trn ON pc_annotations_trn (dsstox)')
-    
-    # Save pc_annotations table
     pc_annotations2.to_sql('pc_annotations', conn, if_exists='replace', index=False)
     conn.execute('CREATE INDEX IF NOT EXISTS idx_pubchem_cid ON pc_annotations (PubChemCID)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_dsstox ON pc_annotations (dsstox)')
@@ -57,7 +49,6 @@ with sqlite3.connect(db_path) as conn:
 # annotations_df = pd.read_sql_query("SELECT * FROM pc_annotations WHERE dsstox = 'DTXSID3024994'", conn)
 annotations_df = pd.read_sql_query("SELECT * FROM pc_annotations", conn)
 
-# Load keywords
 keywords_file = "stages/resources/helpful_headers.txt"
 with open(keywords_file, 'r') as f:
     keywords = f.read().splitlines()
@@ -69,7 +60,6 @@ memhash = memory.HashedMemory(location=memcache, verbose=0)
 logging.basicConfig(filename='error_log.txt', level=logging.ERROR)
 
 def prepare_prompt(dsstox_id, conn):
-    # Query the database
     query = f"SELECT * FROM pc_annotations WHERE dsstox = '{dsstox_id}'"
     df = pd.read_sql_query(query, conn)
     condensed_value = ' '.join(df['value'].dropna())
@@ -126,53 +116,28 @@ with ThreadPoolExecutor(max_workers=40) as executor:  # Adjust workers as needed
 df_results = pd.DataFrame(results)
 print("Results DataFrame:")
 print(df_results)
-
-
-# Merge with your original data (compait_trn) for final processing
-compait_trn = pd.read_parquet(bb.assets('compait').LC50_Tr_parquet)
-# Ensure both columns are strings
 df_results['dsstox'] = df_results['dsstox'].astype(str).str.strip()
 compait_trn['DTXSID'] = compait_trn['DTXSID'].astype(str).str.strip()
-print("Unique dsstox values in df_results:", df_results['dsstox'].unique())
-print("Unique DTXSID values in compait_trn:", compait_trn['DTXSID'].unique())
 dsstox_set = set(df_results['dsstox'].unique())
 dtxsid_set = set(compait_trn['DTXSID'].unique())
 common_values = dsstox_set.intersection(dtxsid_set)
 print(f"Number of overlapping values: {len(common_values)}")
 print("Overlapping values:", common_values)
 
-
-test_df = df_results.merge(compait_trn, left_on='dsstox', right_on='DTXSID', how='left', indicator=True)
-unmatched = test_df[test_df['_merge'] == 'left_only']
-print("Unmatched dsstox values:\n", unmatched[['dsstox']])
-
-
-
-# Perform the merge with compait_trn on dsstox and DTXSID columns
 df = df_results.merge(compait_trn, left_on='dsstox', right_on='DTXSID', how='inner')
 
-# Display information about the merged DataFrame
 print(f"Rows in merged DataFrame: {len(df)}")
 print("Merged DataFrame preview:\n", df.head())
 
-# Proceed only if there are non-null values in 'lc50_4hr_mgL' from df_results
 if 'lc50_4hr_mg_L' in df.columns:
-    # Filter out rows where 'lc50_4hr_mgL' is NaN
     df = df.dropna(subset=['lc50_4hr_mg_L'])
-    
-    # Rename columns for clarity
     df = df.rename(columns={'lc50_4hr_mg_L': 'pred_4_hr_value_mgL_log10', 'confidence': 'CONFIDENCE'})
-    
-    # Create 'APPLICABILITY_DOMAIN' column based on confidence level
     df['APPLICABILITY_DOMAIN'] = (df['CONFIDENCE'] >= 7).astype(int)
-
-    # Display the processed DataFrame
     print("Processed DataFrame preview:\n", df.head())
     print(f"Total rows after processing: {len(df)}")
 else:
     print("The column 'lc50_4hr_mgL' is not present in the merged DataFrame.")
 
-# Calculate metrics
 testdf = df[df['CONFIDENCE'] > 8]
 if not testdf.empty:
     corrld50 = testdf['4_hr_value_mgL'].corr(testdf['pred_4_hr_value_mgL_log10'])
@@ -184,5 +149,4 @@ if not testdf.empty:
 else:
     print("No high-confidence predictions to evaluate.")
 
-# Save results
 df.to_csv(outdir / 'training_insilica_with_relevant_info.csv', index=False)
