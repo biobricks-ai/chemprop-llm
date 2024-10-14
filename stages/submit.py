@@ -1,33 +1,23 @@
-import numpy as np
-import pandas as pd
-import sqlite3
-from tqdm import tqdm
+import sqlite3, dotenv, pathlib, sys, ratelimit, os, pandas as pd, numpy as np, pathlib, biobricks as bb
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sklearn.metrics import r2_score
-import sys
-import pathlib
+from openai import OpenAI
+from tqdm import tqdm
 
 sys.path.append('./')
 import stages.utils.chatgpt as chatgpt
 import stages.utils.memory as memory
 import stages.utils.spark_helpers as sh
 import stages.utils.pubchem_annotations as pubchem_annotations
-from rdkit import Chem
-from rdkit.Chem import Descriptors
-import pubchempy as pcp
-from sklearn.metrics import mean_absolute_error, r2_score
-import os
-from dotenv import load_dotenv
-from openai import OpenAI
-from ratelimit import limits, sleep_and_retry
-import biobricks as bb
-load_dotenv()
+
+dotenv.load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 tqdm.pandas()
 outdir = pathlib.Path("cache/rag_approach")
 outdir.mkdir(parents=True, exist_ok=True)
 
+#%% BUILD PUBCHEM ANNOTATIONS DATABASE FOR RAG ===============================================================
 pc_annotations = bb.assets('pubchem-annotations')
 idannotations = pd.read_parquet(pc_annotations.annotations_parquet)
 idannotations = idannotations[idannotations['PubChemCID'].progress_apply(len) == 1]
@@ -50,15 +40,8 @@ with sqlite3.connect(db_path) as conn:
     conn.execute('CREATE INDEX IF NOT EXISTS idx_pubchem_cid ON pc_annotations (PubChemCID)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_dsstox ON pc_annotations (dsstox)')
 
-compait = bb.assets('compait')
-compait_trn = pd.read_parquet(compait.LC50_Tr_parquet)
-minmgl, maxmgl = 10 ** compait_trn['4_hr_value_mgL'].min(), 10 ** compait_trn['4_hr_value_mgL'].max()
-minppm, maxppm = 10 ** compait_trn['4_hr_value_ppm'].min(), 10 ** compait_trn['4_hr_value_ppm'].max()
-
-# Load keywords
-keywords = pathlib.Path("stages/resources/helpful_headers.txt").read_text().splitlines()
-# Define the prompt preparation function with mg/m^3 and ppm
-def prepare_prompt(chemical_name, dsstox_id, conn, example_chemicals, max_length=120000):
+#%% PREPARE RAG PROMPT =================================================================
+def prepare_prompt(chemical_name, dsstox_id, conn, example_chemicals, keywords, max_length=120000):
     examples_text = "Below is a table of chemicals and their acute inhalation LC50 values in mg/m^3 and ppm.\n\n"
     examples_text += "Chemical\t4hr LC50 (mg/m^3)\t4hr LC50 (ppm)\n"
     examples_text += "--------\t----------------\t------------\n"
@@ -95,11 +78,14 @@ def prepare_prompt(chemical_name, dsstox_id, conn, example_chemicals, max_length
     )
     return full_prompt
 
-@sleep_and_retry
-@limits(calls=1000, period=60)  # Adjust the rate limit as needed
-def compute_chemical(chemical_name, dsstox_id, db_path, example_chemicals):
+#%% COMPUTE CHEMICAL LC50 AND CONFIDENCE =================================================================
+memhash = memory.HashedMemory(outdir / 'cache')
+@memhash.cache
+@ratelimit.sleep_and_retry
+@ratelimit.limits(calls=1000, period=60)  # Adjust the rate limit as needed
+def compute_chemical(chemical_name, dsstox_id, db_path, example_chemicals, keywords):
     with sqlite3.connect(db_path) as conn:
-        full_prompt = prepare_prompt(chemical_name, dsstox_id, conn, example_chemicals)
+        full_prompt = prepare_prompt(chemical_name, dsstox_id, conn, example_chemicals, keywords)
         resg4_mgL = chatgpt.lc50_query_new(units="milligrams_per_cubic_meter", prompt=full_prompt, chemical_name=chemical_name)
         lc50_mgL = resg4_mgL.get('lc50')
         confidence_mgL = resg4_mgL.get('confidence', 0)
@@ -131,6 +117,10 @@ def compute_chemical(chemical_name, dsstox_id, db_path, example_chemicals):
             'prediction_available': prediction_available
         }
 
+#%% MAKE EXAMPLE CHEMICALS =================================================================
+compait = bb.assets('compait')
+compait_trn = pd.read_parquet(compait.LC50_Tr_parquet)
+
 quantiles = np.linspace(0, 1, 11)
 interval_limits = compait_trn['4_hr_value_mgL'].quantile(quantiles).values
 example_chemicals = []
@@ -154,13 +144,17 @@ for i in range(len(interval_limits) - 1):
     
 example_chemicals = sorted(example_chemicals, key=lambda x: x['4_hr_value_mgL'])
 
+#%% COMPUTE CHEMICAL LC50 AND CONFIDENCE =================================================================
+
+keywords = pathlib.Path("stages/resources/helpful_headers.txt").read_text().splitlines()
+
 results = []
 dsstox_ids = compait_trn['DTXSID']
 chemical_names = compait_trn['PREFERRED_NAME']
 
-id_names = list(zip(dsstox_ids, chemical_names))
+id_names = list(zip(dsstox_ids, chemical_names))[:100]
 with ThreadPoolExecutor(max_workers=40) as executor:  # Adjust workers as needed
-    futures = [executor.submit(compute_chemical, name, dss, db_path, example_chemicals) for dss, name in id_names]
+    futures = [executor.submit(compute_chemical, name, dss, db_path, example_chemicals, keywords) for dss, name in id_names]
     for future in tqdm(as_completed(futures), total=len(futures), desc="Processing compounds"):
         try:
             result = future.result()
@@ -172,6 +166,7 @@ df = pd.DataFrame(results).merge(compait_trn, left_on='dsstox', right_on='DTXSID
 df.dropna(subset=['pred_lc50_4hr_mg_L', 'pred_lc50_4hr_ppm'], inplace=True)
 df.to_csv(outdir / 'training_caat_with_relevant_info_mgl_ppm_612.csv', index=False)
 
+#%% EVALUATE PERFORMANCE METRICS =================================================================
 confidence_counts_mgL = df['confidence_mgL'].value_counts()
 confidence_counts_ppm = df['confidence_ppm'].value_counts()
 df['APPLICABILITY_DOMAIN_MGL'] = (df['confidence_mgL'] >= 6).astype(int)
@@ -214,18 +209,17 @@ for threshold in confidence_thresholds:
     corr_ppm, mae_ppm, r2_ppm = calculate_metrics(ppm_subset, '4_hr_value_ppm', 'pred_lc50_4hr_ppm')
     print(f"ppm Predictions (n={len(ppm_subset)}) - Correlation: {corr_ppm:.2f}, MAE: {mae_ppm:.2f}, R²: {r2_ppm:.2f}")
 
-# =================test set=====================
-
-
-# compait_test = pd.read_parquet(compait.PredictionSet_parquet)
+#%% RUN ON TEST SET =================================================================
+compait_test = pd.read_parquet(compait.PredictionSet_parquet)
+keywords = pathlib.Path("stages/resources/helpful_headers.txt").read_text().splitlines()
 
 results_test = []
 dsstox_ids_test = compait_test['DTXSID']
 chemical_names_test = compait_test['PREFERRED_NAME']
 
 id_names_test = list(zip(dsstox_ids_test, chemical_names_test))
-with ThreadPoolExecutor(max_workers=40) as executor:  # Adjust workers as needed
-    futures = [executor.submit(compute_chemical, name, dss, db_path, example_chemicals) for dss, name in id_names_test]
+with ThreadPoolExecutor(max_workers=40) as executor:  
+    futures = [executor.submit(compute_chemical, name, dss, db_path, example_chemicals, keywords) for dss, name in id_names_test]
     for future in tqdm(as_completed(futures), total=len(futures), desc="Processing compounds"):
         try:
             result = future.result()

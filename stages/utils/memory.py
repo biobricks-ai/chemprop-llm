@@ -1,10 +1,10 @@
 import hashlib
-import os
 import pathlib
 import json
 from joblib import Memory
 
 class HashedMemory(Memory):
+
     def __init__(self, location, verbose=0):
         super().__init__(location=location, verbose=verbose)
 
@@ -35,19 +35,3 @@ class HashedMemory(Memory):
             
             return result
         return wrapper
-
-
-# Create a HashedMemory object
-# cache_dir = pathlib.Path("cache/hashed_cache")
-# hashed_memory = HashedMemory(location=cache_dir, verbose=0)
-
-# # Example usage
-# @hashed_memory.cache
-# def compute_chemical_ppm(compound_name, casrn):
-#     # Simulated computation (replace with real function)
-#     return {"compound_name": compound_name, "casrn": casrn, "ppm_value": 42}
-
-# @hashed_memory.cache
-# def compute_chemical_mgl(compound_name, casrn):
-#     # Simulated computation (replace with real function)
-#     return {"compound_name": compound_name, "casrn": casrn, "mgl_value": 0.12}
