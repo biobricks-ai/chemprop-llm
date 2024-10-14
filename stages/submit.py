@@ -152,7 +152,7 @@ results = []
 dsstox_ids = compait_trn['DTXSID']
 chemical_names = compait_trn['PREFERRED_NAME']
 
-id_names = list(zip(dsstox_ids, chemical_names))[:100]
+id_names = list(zip(dsstox_ids, chemical_names))
 with ThreadPoolExecutor(max_workers=40) as executor:  # Adjust workers as needed
     futures = [executor.submit(compute_chemical, name, dss, db_path, example_chemicals, keywords) for dss, name in id_names]
     for future in tqdm(as_completed(futures), total=len(futures), desc="Processing compounds"):
@@ -218,7 +218,7 @@ results_test = []
 dsstox_ids_test = compait_test['DTXSID']
 chemical_names_test = compait_test['PREFERRED_NAME']
 
-id_names_test = list(zip(dsstox_ids_test, chemical_names_test))[:10]
+id_names_test = list(zip(dsstox_ids_test, chemical_names_test))
 with ThreadPoolExecutor(max_workers=40) as executor:  
     futures = [executor.submit(compute_chemical, name, dss, db_path, example_chemicals, keywords) for dss, name in id_names_test]
     for future in tqdm(as_completed(futures), total=len(futures), desc="Processing compounds"):
