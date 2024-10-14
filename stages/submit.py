@@ -164,7 +164,7 @@ with ThreadPoolExecutor(max_workers=40) as executor:  # Adjust workers as needed
 
 df = pd.DataFrame(results).merge(compait_trn, left_on='dsstox', right_on='DTXSID', how='inner')
 df.dropna(subset=['pred_lc50_4hr_mg_L', 'pred_lc50_4hr_ppm'], inplace=True)
-df.to_csv(outdir / 'training_caat_with_relevant_info_mgl_ppm_612.csv', index=False)
+df.to_csv(outdir / 'training.csv', index=False)
 
 #%% EVALUATE PERFORMANCE METRICS =================================================================
 confidence_counts_mgL = df['confidence_mgL'].value_counts()
@@ -211,13 +211,14 @@ for threshold in confidence_thresholds:
 
 #%% RUN ON TEST SET =================================================================
 compait_test = pd.read_parquet(compait.PredictionSet_parquet)
+compait_test = compait_test.rename(columns={'DSSTOX_SUBSTANCE_ID':'DTXSID'})
 keywords = pathlib.Path("stages/resources/helpful_headers.txt").read_text().splitlines()
 
 results_test = []
 dsstox_ids_test = compait_test['DTXSID']
 chemical_names_test = compait_test['PREFERRED_NAME']
 
-id_names_test = list(zip(dsstox_ids_test, chemical_names_test))
+id_names_test = list(zip(dsstox_ids_test, chemical_names_test))[:10]
 with ThreadPoolExecutor(max_workers=40) as executor:  
     futures = [executor.submit(compute_chemical, name, dss, db_path, example_chemicals, keywords) for dss, name in id_names_test]
     for future in tqdm(as_completed(futures), total=len(futures), desc="Processing compounds"):
@@ -229,4 +230,4 @@ with ThreadPoolExecutor(max_workers=40) as executor:
 
 df_test = pd.DataFrame(results_test).merge(compait_test, left_on='dsstox', right_on='DTXSID', how='inner')
 df_test.dropna(subset=['pred_lc50_4hr_mg_L', 'pred_lc50_4hr_ppm'], inplace=True)
-df_test.to_csv(outdir / 'test_caat_with_relevant_info_mgl_ppm.csv', index=False)
+df_test.to_csv(outdir / 'testing.csv', index=False)
