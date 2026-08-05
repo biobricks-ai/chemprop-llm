@@ -1,0 +1,60 @@
+{
+  "@context": "../../context/source.context.jsonld",
+  "@type": "dcat:Dataset",
+  "@id": "https://biobricks.ai/bricks/chemprop-llm",
+  "dcterms:title": "chemprop-llm training tables (PubChem annotations + EPA CoMPAIT acute inhalation LC50)",
+  "dcterms:description": "A BioBricks brick that builds SELFIES/property/value training tables for an LLM regression model over chemical properties. Stage stages/01_load_pubchem.py joins three upstream BioBricks assets: PubChem compound SMILES (bb.assets('pubchem')), PubChem annotations filtered to the EPA DSSTox source (bb.assets('pubchem-annotations')), and the EPA/NICEATM CoMPAIT acute inhalation toxicity dataset (bb.assets('compait'), providing 4-hr LC50 mg/L and ppm values). Because the combined redistributable data includes CoMPAIT, which is CC BY 4.0, the governing class is attribution.",
+  "dcterms:license": [
+    "https://creativecommons.org/licenses/by/4.0/",
+    "https://www.usa.gov/government-works"
+  ],
+  "dcterms:creator": "NICEATM CoMPAIT Consortium (LC50); PubChem / NIH NLM NCBI and EPA DSSTox (annotations, SMILES)",
+  "dcterms:publisher": "Insilica / BioBricks (brick); derived from PubChem (NIH) and EPA/NICEATM (CoMPAIT)",
+  "biobricks:licenseName": "CC BY 4.0 (CoMPAIT) + US Government Work (PubChem/EPA DSSTox)",
+  "biobricks:licenseClass": "attribution",
+  "biobricks:merckCommercialUse": "conditional",
+  "biobricks:licenseEvidence": [
+    {
+      "source": "stages/01_load_pubchem.py",
+      "quote": "compait = bb.assets('compait') ... compait_trn = spark.read.parquet(compait.LC50_Tr_parquet)... pcid = idannotations[idannotations['SourceName'] == 'EPA DSSTox'] ... pubchem_biobrick = bb.assets('pubchem')",
+      "confidence": "high"
+    },
+    {
+      "source": "https://github.com/biobricks-ai/compait (README, upstream asset used by this brick)",
+      "quote": "License: CC BY 4.0",
+      "confidence": "high"
+    },
+    {
+      "source": "WebSearch: NICEATM/NTP CoMPAIT (Collaborative Modeling Project for Acute Inhalation Toxicity)",
+      "quote": "The data originates from the NICEATM CoMPAIT Consortium, administered through the National Toxicology Program (NTP) ... released under CC BY 4.0",
+      "confidence": "medium"
+    }
+  ],
+  "biobricks:reviewed": false,
+  "biobricks:reviewNotes": "Determined by the BioBricks licensing-provenance annotation agent (Claude). The brick has no .bb/source.jsonld and no download stage of its own; it composes three upstream BioBricks assets read via bb.assets(): PubChem SMILES, PubChem annotations restricted to SourceName=='EPA DSSTox', and CoMPAIT LC50 data. PubChem and EPA DSSTox are US federal / public-domain sources (open). CoMPAIT is CC BY 4.0 (confirmed on the biobricks-ai/compait README and NICEATM/NTP provenance). Most-restrictive-governs => attribution; commercial use permitted only with attribution => conditional. HUMAN REVIEW: confirm PubChem annotation subset carries no depositor-specific restriction, and that CoMPAIT attribution text is carried through in redistribution.",
+  "prov:wasDerivedFrom": [
+    {
+      "@type": "dcat:Dataset",
+      "@id": "https://github.com/biobricks-ai/compait",
+      "dcterms:title": "CoMPAIT - Collaborative Modeling Project for Acute Inhalation Toxicity (EPA/NICEATM/NTP)",
+      "dcterms:license": "https://creativecommons.org/licenses/by/4.0/",
+      "dcterms:publisher": "NICEATM / National Toxicology Program (NTP)",
+      "dcat:landingPage": "https://ntp.niehs.nih.gov/go/iccvam"
+    },
+    {
+      "@type": "dcat:Dataset",
+      "@id": "https://pubchem.ncbi.nlm.nih.gov/",
+      "dcterms:title": "PubChem compound SMILES and annotations (EPA DSSTox subset)",
+      "dcterms:license": "https://www.usa.gov/government-works",
+      "dcterms:publisher": "NIH National Library of Medicine (NCBI) / EPA DSSTox"
+    }
+  ],
+  "prov:wasGeneratedBy": {
+    "@type": "prov:Activity",
+    "prov:wasAssociatedWith": "BioBricks licensing-provenance annotation agent (Claude, slice items[276:282])",
+    "prov:endedAtTime": {
+      "@type": "xsd:dateTime",
+      "@value": "2026-08-05T00:00:00Z"
+    }
+  }
+}
